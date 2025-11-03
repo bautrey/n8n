@@ -27,21 +27,19 @@ This is a Docker-based n8n environment optimized for Claude Code to act as the p
 
 ### When Asked to Create/Modify Workflows
 
-1. **Suggest Agent OS Workflow** (unless user explicitly wants direct implementation):
-   ```
-   "I should create a proper specification for this workflow using Agent OS
-   rather than implementing directly. This ensures better planning and
-   documentation. Would you like me to use the `/shape-spec` command to
-   gather requirements, or would you prefer direct implementation?"
-   ```
+**This project uses AI Mesh commands, NOT Agent OS commands.**
 
-2. **Agent OS Workflow**:
-   - `/shape-spec` - Gather requirements with clarifying questions
-   - `/write-spec` - Create detailed specification document
-   - `/create-tasks` - Break down into actionable tasks
-   - `/implement-tasks` - Execute implementation
+1. **For TRD Implementation**:
+   - Use `/ai-mesh:implement-trd` command
+   - Delegates to ai-mesh-orchestrator → tech-lead-orchestrator
+   - Follows TDD methodology with quality gates
 
-3. **Direct Implementation** (if user approves):
+2. **For Creating Specifications**:
+   - Use `/ai-mesh:create-prd` for Product Requirements Documents
+   - Use `/ai-mesh:create-trd` for Technical Requirements Documents
+   - Use `/ai-mesh:refine-prd` or `/ai-mesh:refine-trd` for updates
+
+3. **Direct Implementation** (if user explicitly requests):
    - Create/modify workflow JSON in `workflows/`
    - Deploy to n8n via REST API
    - Test execution
@@ -139,10 +137,11 @@ curl -H "X-N8N-API-KEY: ${N8N_API_KEY}" \
 
 ## Integration with Burke's Environment
 
-### Agent OS
-- Commands available: `/shape-spec`, `/write-spec`, `/create-tasks`, `/implement-tasks`
-- Standards: `agent-os/standards/`
-- Specs: `agent-os/specs/YYYY-MM-DD-spec-name/`
+### AI Mesh Commands
+- **TRD Implementation**: `/ai-mesh:implement-trd`
+- **PRD/TRD Creation**: `/ai-mesh:create-prd`, `/ai-mesh:create-trd`
+- **Refinement**: `/ai-mesh:refine-prd`, `/ai-mesh:refine-trd`
+- **Specs Location**: `agent-os/specs/YYYY-MM-DD-spec-name/`
 
 ### Observability (Optional)
 - Logging stack: `/Users/burke/obs/`
@@ -169,12 +168,11 @@ cd ../n8n-feature1
 ## Common Tasks
 
 ### Create New Workflow
-1. Suggest spec-first approach with Agent OS
-2. If approved, use `/shape-spec` to gather requirements
-3. Create workflow JSON in `workflows/`
-4. Deploy via API
-5. Test execution
-6. Commit to git
+1. For specification-based development, use AI Mesh commands (`/ai-mesh:create-trd`)
+2. For direct implementation, create workflow JSON in `workflows/`
+3. Deploy via API
+4. Test execution
+5. Commit to git
 
 ### Modify Existing Workflow
 1. Read existing workflow JSON
@@ -260,13 +258,13 @@ When starting a new Claude Code session:
 3. **Verify services running** - `docker compose ps`
 4. **Test API access** - Quick curl test
 5. **Review recent commits** - Understand current state
-6. **Suggest Agent OS for new work** - Spec-first approach
+6. **Use AI Mesh for spec-based work** - Commands prefixed with `/ai-mesh:`
 
 ## Context Preservation
 
 This project uses:
 - **CLAUDE.md** (this file) - Project-specific instructions
-- **Agent OS specs** - `agent-os/specs/` for feature documentation
+- **AI Mesh specs** - `agent-os/specs/` for feature documentation
 - **Git history** - Workflow evolution and changes
 - **Linear issues** - Work item tracking (optional)
 
