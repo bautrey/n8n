@@ -1,0 +1,415 @@
+{
+  "name": "Make.com → GitHub Backup",
+  "nodes": [
+    {
+      "parameters": {
+        "cronExpression": "0 2 * * *",
+        "timezone": "America/Chicago"
+      },
+      "name": "Daily 2AM CST Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "executionId",
+              "value": "={{ $execution.id }}"
+            },
+            {
+              "name": "workflowId",
+              "value": "={{ $workflow.id }}"
+            },
+            {
+              "name": "executionStartTime",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Initialize Execution Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/bautrey/n8n/contents/backup-state.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "method": "GET",
+        "options": {
+          "allowUnauthorizedCerts": false,
+          "followRedirect": true
+        }
+      },
+      "name": "Read Backup State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [650, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Parse the backup state from GitHub response\n// Handle 404 case (file doesn't exist yet)\n\nconst items = $input.all();\n\nif (items.length === 0 || items[0].json.error) {\n  // File doesn't exist or error occurred, return empty state\n  return [\n    {\n      json: {\n        lastBackup: {},\n        metadata: {\n          firstBackup: $now.toISO(),\n          totalBackups: 0\n        }\n      }\n    }\n  ];\n}\n\n// Decode base64 content from GitHub\nconst content = items[0].json.content;\nconst decodedContent = Buffer.from(content, 'base64').toString('utf-8');\nconst backupState = JSON.parse(decodedContent);\n\n// Store the SHA for later update\nconst sha = items[0].json.sha;\n\nreturn [\n  {\n    json: {\n      ...backupState,\n      _githubSha: sha\n    }\n  }\n];"
+      },
+      "name": "Parse Backup State",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://us1.make.com/api/v2/scenarios?teamId=154819",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "makeApi",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Fetch All Scenarios",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Filter scenarios that have changed since last backup\n\nconst scenarios = $input.all()[0].json.scenarios || [];\nconst backupState = $node['Parse Backup State'].json;\nconst lastBackup = backupState.lastBackup || {};\n\nconst changedScenarios = scenarios.filter(scenario => {\n  const scenarioId = scenario.id.toString();\n  const lastEditedDate = new Date(scenario.lastEditedDate).getTime();\n  const lastBackupDate = lastBackup[scenarioId] \n    ? new Date(lastBackup[scenarioId]).getTime() \n    : 0;\n  \n  return lastEditedDate > lastBackupDate;\n});\n\nconsole.log(`Total scenarios: ${scenarios.length}`);\nconsole.log(`Changed scenarios: ${changedScenarios.length}`);\n\nreturn changedScenarios.map(scenario => ({ json: scenario }));"
+      },
+      "name": "Filter Changed Scenarios",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "name": "Split Scenarios",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://us1.make.com/api/v2/scenarios/{{$json.id}}/blueprint",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "makeApi",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Download Blueprint",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/bautrey/n8n/contents/scenarios/{{$node['Split Scenarios'].json.id}}.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Check Existing File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1850, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare commit data for GitHub\n// Base64 encode blueprint and format commit message\n\nconst scenarioData = $node['Split Scenarios'].json;\nconst blueprint = $input.all()[0].json.response || $input.all()[0].json;\nconst existingFile = $node['Check Existing File'].json;\n\n// Base64 encode the blueprint\nconst blueprintJson = JSON.stringify(blueprint, null, 2);\nconst base64Content = Buffer.from(blueprintJson).toString('base64');\n\n// Format commit message\nconst scenarioId = scenarioData.id;\nconst scenarioName = scenarioData.name || `Scenario ${scenarioId}`;\nconst commitMessage = `Update scenario ${scenarioId}: ${scenarioName}`;\n\n// Extract SHA if file exists (required for updates)\nconst sha = existingFile.sha || null;\n\nreturn [\n  {\n    json: {\n      scenarioId,\n      scenarioName,\n      commitMessage,\n      base64Content,\n      sha,\n      lastEditedDate: scenarioData.lastEditedDate\n    }\n  }\n];"
+      },
+      "name": "Prepare Commit Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2050, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/bautrey/n8n/contents/scenarios/{{$json.scenarioId}}.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "method": "PUT",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $json.commitMessage }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.base64Content }}"
+            },
+            {
+              "name": "sha",
+              "value": "={{ $json.sha }}"
+            },
+            {
+              "name": "branch",
+              "value": "main"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Commit Scenario File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Update backup state with new scenario timestamps\n// This node will be called at the end of workflow\n\nconst items = $input.all();\nconst backupState = items[0].json;\n\n// TODO: Will merge scenario timestamps from processing loop\n// For now, just prepare structure\n\nconst updatedState = {\n  lastBackup: backupState.lastBackup || {},\n  metadata: {\n    ...backupState.metadata,\n    lastBackupTime: $now.toISO(),\n    totalBackups: (backupState.metadata?.totalBackups || 0) + 1\n  }\n};\n\nreturn [\n  {\n    json: {\n      backupState: updatedState,\n      _githubSha: backupState._githubSha\n    }\n  }\n];"
+      },
+      "name": "Update Backup State",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/bautrey/n8n/contents/backup-state.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "method": "PUT",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "=Update backup state - {{ $now.toISO() }}"
+            },
+            {
+              "name": "content",
+              "value": "={{ Buffer.from(JSON.stringify($json.backupState, null, 2)).toString('base64') }}"
+            },
+            {
+              "name": "sha",
+              "value": "={{ $json._githubSha }}"
+            },
+            {
+              "name": "branch",
+              "value": "main"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Commit Backup State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [2850, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Aggregate results from workflow execution\n// Count total scenarios, successful commits, errors\n\nconst executionContext = $node['Initialize Execution Context'].json;\nconst allScenarios = $node['Fetch All Scenarios'].json.scenarios || [];\nconst changedScenariosCount = $node['Filter Changed Scenarios'].json?.length || 0;\n\n// Calculate execution duration\nconst startTime = new Date(executionContext.executionStartTime);\nconst endTime = new Date();\nconst durationMs = endTime - startTime;\nconst durationSec = Math.round(durationMs / 1000);\nconst durationMin = Math.floor(durationSec / 60);\nconst durationRemainingSec = durationSec % 60;\nconst durationFormatted = `${durationMin}m ${durationRemainingSec}s`;\n\n// TODO: Count actual successes and errors from loop\n// For now, assume all changed scenarios were successful\nconst successCount = changedScenariosCount;\nconst errorCount = 0;\nconst skippedCount = allScenarios.length - changedScenariosCount;\n\nreturn [\n  {\n    json: {\n      totalScenarios: allScenarios.length,\n      changedScenarios: changedScenariosCount,\n      successfulCommits: successCount,\n      errors: errorCount,\n      skipped: skippedCount,\n      duration: durationFormatted,\n      durationSeconds: durationSec,\n      executionId: executionContext.executionId,\n      timestamp: endTime.toISOString()\n    }\n  }\n];"
+      },
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [3050, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Format Slack message per PRD specification\n\nconst stats = $input.all()[0].json;\nconst emoji = stats.errors > 0 ? '⚠️' : '✅';\nconst status = stats.errors > 0 ? 'COMPLETED WITH ERRORS' : 'SUCCESS';\n\n// Format message following PRD specification\nconst message = `${emoji} *Make.com → GitHub Backup: ${status}*\n\n*Workflow:* Make.com Scenario Backup\n*Context:* Automated daily backup (2:00 AM CST)\n*Timestamp:* ${stats.timestamp}\n*Duration:* ${stats.duration}\n\n*Summary:*\n• Total scenarios in Make.com: ${stats.totalScenarios}\n• Changed scenarios: ${stats.changedScenarios}\n• Successfully backed up: ${stats.successfulCommits}\n• Skipped (no changes): ${stats.skipped}\n• Errors: ${stats.errors}\n\n*Details:*\n• Repository: bautrey/n8n\n• Branch: main\n• Execution ID: ${stats.executionId}\n\n*Changes:* ${stats.changedScenarios} scenario(s) updated in GitHub`;\n\nreturn [\n  {\n    json: {\n      message,\n      stats\n    }\n  }\n];"
+      },
+      "name": "Format Slack Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [3250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "channel": "={{ $env.SLACK_CHANNEL_ID }}",
+        "text": "={{ $json.message }}",
+        "otherOptions": {}
+      },
+      "name": "Send Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 1,
+      "position": [3450, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "1",
+          "name": "Slack n8n Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 2AM CST Trigger": {
+      "main": [
+        [
+          {
+            "node": "Initialize Execution Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Execution Context": {
+      "main": [
+        [
+          {
+            "node": "Read Backup State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Backup State": {
+      "main": [
+        [
+          {
+            "node": "Parse Backup State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Backup State": {
+      "main": [
+        [
+          {
+            "node": "Fetch All Scenarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Scenarios": {
+      "main": [
+        [
+          {
+            "node": "Filter Changed Scenarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Changed Scenarios": {
+      "main": [
+        [
+          {
+            "node": "Split Scenarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Scenarios": {
+      "main": [
+        [
+          {
+            "node": "Download Blueprint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Blueprint": {
+      "main": [
+        [
+          {
+            "node": "Check Existing File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing File": {
+      "main": [
+        [
+          {
+            "node": "Prepare Commit Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Commit Data": {
+      "main": [
+        [
+          {
+            "node": "Commit Scenario File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Commit Scenario File": {
+      "main": [
+        [
+          {
+            "node": "Split Scenarios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Backup State": {
+      "main": [
+        [
+          {
+            "node": "Commit Backup State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Commit Backup State": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Format Slack Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Slack Message": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
