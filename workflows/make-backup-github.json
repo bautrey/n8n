@@ -38,7 +38,7 @@
     },
     {
       "parameters": {
-        "url": "https://api.github.com/repos/bautrey/n8n/contents/backup-state.json",
+        "url": "https://api.github.com/repos/bautrey/make-scenarios-backup/contents/backup-state.json",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "githubApi",
         "method": "GET",
@@ -109,7 +109,7 @@
     },
     {
       "parameters": {
-        "url": "=https://api.github.com/repos/bautrey/n8n/contents/scenarios/{{$node['Split Scenarios'].json.id}}.json",
+        "url": "=https://api.github.com/repos/bautrey/make-scenarios-backup/contents/scenarios/{{$node['Split Scenarios'].json.id}}.json",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "githubApi",
         "method": "GET",
@@ -132,7 +132,7 @@
     },
     {
       "parameters": {
-        "url": "=https://api.github.com/repos/bautrey/n8n/contents/scenarios/{{$json.scenarioId}}.json",
+        "url": "=https://api.github.com/repos/bautrey/make-scenarios-backup/contents/scenarios/{{$json.scenarioId}}.json",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "githubApi",
         "method": "PUT",
@@ -175,7 +175,7 @@
     },
     {
       "parameters": {
-        "url": "https://api.github.com/repos/bautrey/n8n/contents/backup-state.json",
+        "url": "https://api.github.com/repos/bautrey/make-scenarios-backup/contents/backup-state.json",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "githubApi",
         "method": "PUT",
@@ -218,7 +218,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Format Slack message per PRD specification\n\nconst stats = $input.all()[0].json;\nconst emoji = stats.errors > 0 ? '⚠️' : '✅';\nconst status = stats.errors > 0 ? 'COMPLETED WITH ERRORS' : 'SUCCESS';\n\n// Format message following PRD specification\nconst message = `${emoji} *Make.com → GitHub Backup: ${status}*\n\n*Workflow:* Make.com Scenario Backup\n*Context:* Automated daily backup (2:00 AM CST)\n*Timestamp:* ${stats.timestamp}\n*Duration:* ${stats.duration}\n\n*Summary:*\n• Total scenarios in Make.com: ${stats.totalScenarios}\n• Changed scenarios: ${stats.changedScenarios}\n• Successfully backed up: ${stats.successfulCommits}\n• Skipped (no changes): ${stats.skipped}\n• Errors: ${stats.errors}\n\n*Details:*\n• Repository: bautrey/n8n\n• Branch: main\n• Execution ID: ${stats.executionId}\n\n*Changes:* ${stats.changedScenarios} scenario(s) updated in GitHub`;\n\nreturn [\n  {\n    json: {\n      message,\n      stats\n    }\n  }\n];"
+        "functionCode": "// Format Slack message per PRD specification\n\nconst stats = $input.all()[0].json;\nconst emoji = stats.errors > 0 ? '⚠️' : '✅';\nconst status = stats.errors > 0 ? 'COMPLETED WITH ERRORS' : 'SUCCESS';\n\n// Format message following PRD specification\nconst message = `${emoji} *Make.com → GitHub Backup: ${status}*\n\n*Workflow:* Make.com Scenario Backup\n*Context:* Automated daily backup (2:00 AM CST)\n*Timestamp:* ${stats.timestamp}\n*Duration:* ${stats.duration}\n\n*Summary:*\n• Total scenarios in Make.com: ${stats.totalScenarios}\n• Changed scenarios: ${stats.changedScenarios}\n• Successfully backed up: ${stats.successfulCommits}\n• Skipped (no changes): ${stats.skipped}\n• Errors: ${stats.errors}\n\n*Details:*\n• Repository: bautrey/make-scenarios-backup\n• Branch: main\n• Execution ID: ${stats.executionId}\n\n*Changes:* ${stats.changedScenarios} scenario(s) updated in GitHub`;\n\nreturn [\n  {\n    json: {\n      message,\n      stats\n    }\n  }\n];"
       },
       "name": "Format Slack Message",
       "type": "n8n-nodes-base.function",
