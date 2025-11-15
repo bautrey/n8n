@@ -53,6 +53,15 @@ services:
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
       - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+
+      # n8n security - allow env access
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=${N8N_BLOCK_ENV_ACCESS_IN_NODE:-false}
+
+      # Custom API credentials for workflows
+      - MAKE_API_KEY=${MAKE_API_KEY}
+      - GITHUB_PAT=${GITHUB_PAT}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_CHANNEL_ID=${SLACK_CHANNEL_ID}
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
