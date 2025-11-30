@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {
-        "cronExpression": "0 2 * * *",
+        "cronExpression": "*/2 * * * *",
         "timezone": "America/Chicago"
       },
       "name": "Daily 2AM CST Trigger",
@@ -151,7 +151,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Prepare commit data for GitHub\n// Base64 encode blueprint and format commit message\n\nconst scenarioData = $node['Split Scenarios'].json;\nconst blueprint = $input.all()[0].json.response || $input.all()[0].json;\nconst existingFile = $node['Check Existing File'].json;\n\n// Base64 encode the blueprint\nconst blueprintJson = JSON.stringify(blueprint, null, 2);\nconst base64Content = Buffer.from(blueprintJson).toString('base64');\n\n// Format commit message\nconst scenarioId = scenarioData.id;\nconst scenarioName = scenarioData.name || `Scenario ${scenarioId}`;\nconst commitMessage = `Update scenario ${scenarioId}: ${scenarioName}`;\n\n// Extract SHA if file exists (required for updates)\nconst sha = existingFile.sha || null;\n\nreturn [\n  {\n    json: {\n      scenarioId,\n      scenarioName,\n      commitMessage,\n      base64Content,\n      sha,\n      lastEditedDate: scenarioData.lastEdit\n    }\n  }\n];"
+        "functionCode": "// Prepare commit data for GitHub\n// Base64 encode blueprint and format commit message\n\nconst scenarioData = $node['Split Scenarios'].json;\n// FIX: Get blueprint from Download Blueprint node, not from Check Existing File!\nconst blueprint = $node['Download Blueprint'].json.response || $node['Download Blueprint'].json;\nconst existingFile = $input.all()[0].json;  // This is the GitHub file check response\n\n// Base64 encode the blueprint\nconst blueprintJson = JSON.stringify(blueprint, null, 2);\nconst base64Content = Buffer.from(blueprintJson).toString('base64');\n\n// Format commit message\nconst scenarioId = scenarioData.id;\nconst scenarioName = scenarioData.name || `Scenario ${scenarioId}`;\nconst commitMessage = `Update scenario ${scenarioId}: ${scenarioName}`;\n\n// Extract SHA if file exists (required for updates)\nconst sha = existingFile.sha || null;\n\nreturn [\n  {\n    json: {\n      scenarioId,\n      scenarioName,\n      commitMessage,\n      base64Content,\n      sha,\n      lastEditedDate: scenarioData.lastEdit\n    }\n  }\n];"
       },
       "name": "Prepare Commit Data",
       "type": "n8n-nodes-base.function",
