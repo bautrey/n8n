@@ -1,0 +1,167 @@
+{
+  "name": "Recent Invoices",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 2,3,4,5,17,18,19,20 * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Monthly Schedule (Days 2-5, 17-20 at 5AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  EngagementOwner,\n  Client,\n  LastInvoice,\n  DaysSince,\n  DelResource\nFROM partnerconnect.HC_Recent_Active_Client_Invoices\nORDER BY DaysSince DESC",
+        "options": {}
+      },
+      "id": "mysql-recent-invoices",
+      "name": "Fetch Recent Active Client Invoices",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [250, 300],
+      "credentials": {
+        "mySql": {
+          "id": "mysql-connect-v3",
+          "name": "MySQL Connect V3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Aggregate query results into HTML table rows\nconst items = $input.all();\n\nif (items.length === 0) {\n  return [{\n    json: {\n      tableRows: '<tr><td colspan=\"5\" style=\"text-align: center; padding: 20px; color: #666;\">No clients found with invoices over 15 days old.</td></tr>',\n      clientCount: 0\n    }\n  }];\n}\n\n// Format date helper\nconst formatDate = (dateStr) => {\n  if (!dateStr) return 'N/A';\n  const date = new Date(dateStr);\n  const month = String(date.getMonth() + 1).padStart(2, '0');\n  const day = String(date.getDate()).padStart(2, '0');\n  const year = date.getFullYear();\n  return `${month}-${day}-${year}`;\n};\n\n// Build HTML table rows\nconst tableRows = items.map(item => {\n  const data = item.json;\n  return `<tr>\n  <td>${data.EngagementOwner || 'N/A'}</td>\n  <td>${data.Client || 'N/A'}</td>\n  <td>${formatDate(data.LastInvoice)}</td>\n  <td>${data.DaysSince || 0}</td>\n  <td>${data.DelResource || 'N/A'}</td>\n</tr>`;\n}).join('\\n');\n\nreturn [{\n  json: {\n    tableRows: tableRows,\n    clientCount: items.length\n  }\n}];"
+      },
+      "id": "aggregate-rows",
+      "name": "Build HTML Table Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Build complete email HTML body\nconst data = $input.first().json;\nconst today = new Date();\nconst formattedDate = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}-${today.getFullYear()}`;\n\nconst htmlBody = `<!DOCTYPE html>\n<html>\n<head>\n<style>\ntable {\n  font-family: arial, sans-serif;\n  border-collapse: collapse;\n  table-layout: fixed;\n  width: 100%;\n}\n\ntd, th {\n  border: 1px solid #dddddd;\n  text-align: left;\n  padding: 8px;\n}\n\ntr:nth-child(even) {\n  background-color: #dddddd;\n}\n</style>\n</head>\n<body>\n<br/>\nAll clients not invoiced in over 15 days.\n<br/>\nIf the engagement should be closed, let me know.\n<br/>\n<br/>\n<table>\n  <tr>\n    <th>Engagement Owner</th>\n    <th>Client</th>\n    <th>Last Invoice</th>\n    <th>Days Since</th>\n    <th>Delivery Resource</th>\n  </tr>\n${data.tableRows}\n</table>\n<br/>\n<p style=\"color: #666; font-size: 12px;\">Total clients: ${data.clientCount}</p>\n</body>\n</html>`;\n\nreturn [{\n  json: {\n    subject: `Recent Invoices as of ${formattedDate}`,\n    htmlBody: htmlBody,\n    clientCount: data.clientCount\n  }\n}];"
+      },
+      "id": "build-email",
+      "name": "Build Email HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.postmarkapp.com/email",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"From\": \"Accounting@FortiumPartners.com\",\n  \"To\": \"mp@fortiumpartners.com\",\n  \"Subject\": \"{{ $json.subject }}\",\n  \"HtmlBody\": {{ JSON.stringify($json.htmlBody) }}\n}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email via Postmark",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "postmark-api",
+          "name": "Postmark API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Log successful execution\nconst emailData = $('Build Email HTML').first().json;\nconst emailResult = $input.first().json;\n\nconsole.log(`✅ Recent Invoices workflow completed successfully`);\nconsole.log(`   - Clients found: ${emailData.clientCount}`);\nconsole.log(`   - Email sent to: mp@fortiumpartners.com`);\nconsole.log(`   - Subject: ${emailData.subject}`);\n\nif (emailResult.MessageID) {\n  console.log(`   - Postmark Message ID: ${emailResult.MessageID}`);\n}\n\nreturn [{\n  json: {\n    success: true,\n    clientCount: emailData.clientCount,\n    timestamp: new Date().toISOString(),\n    messageId: emailResult.MessageID || null\n  }\n}];"
+      },
+      "id": "log-success",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Monthly Schedule (Days 2-5, 17-20 at 5AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Recent Active Client Invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Recent Active Client Invoices": {
+      "main": [
+        [
+          {
+            "node": "Build HTML Table Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build HTML Table Rows": {
+      "main": [
+        [
+          {
+            "node": "Build Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Send Email via Postmark",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email via Postmark": {
+      "main": [
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
