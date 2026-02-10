@@ -1,0 +1,90 @@
+#!/bin/bash
+# ScanSnap Webhook — Posts scanned files to n8n webhook
+# Called by ScanSnap Home via "Send to Application" feature
+#
+# ScanSnap Home passes file paths as arguments when launched via "open" command.
+# It may also pass files via the macOS open-file Apple Event, which results in
+# the file path appearing as an argument after any flags.
+
+# Ensure full PATH — ScanSnap Home may launch with a minimal environment
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:$PATH"
+
+WEBHOOK_URL="https://fortium.app.n8n.cloud/webhook/ceo-scan-upload"
+LOG_FILE="$HOME/Library/Logs/scansnap-webhook.log"
+
+log() {
+    echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $1" >> "$LOG_FILE"
+}
+
+notify() {
+    local title="$1"
+    local message="$2"
+    local sound="$3"
+    /usr/bin/osascript -e "display notification \"$message\" with title \"$title\" sound name \"$sound\"" 2>/dev/null
+}
+
+# Find the file path from arguments (skip any flags like -psn_*)
+FILE_PATH=""
+for arg in "$@"; do
+    if [[ "$arg" != -* && -f "$arg" ]]; then
+        FILE_PATH="$arg"
+        break
+    fi
+done
+
+if [ -z "$FILE_PATH" ]; then
+    log "ERROR: No valid file path received. Args: $*"
+    notify "Scan Upload Failed" "No file received from ScanSnap" "Basso"
+    exit 1
+fi
+
+if [ ! -f "$FILE_PATH" ]; then
+    log "ERROR: File not found: $FILE_PATH"
+    notify "Scan Upload Failed" "File not found: $(basename "$FILE_PATH")" "Basso"
+    exit 1
+fi
+
+FILENAME=$(basename "$FILE_PATH")
+SCANNED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+FILE_SIZE=$(stat -f%z "$FILE_PATH" 2>/dev/null || echo "unknown")
+
+log "INFO: Uploading $FILENAME ($FILE_SIZE bytes) from $FILE_PATH"
+
+# Copy file to /tmp to avoid macOS TCC sandbox restrictions on ~/Documents
+UPLOAD_FILE="/tmp/scansnap-upload-$$.pdf"
+cp "$FILE_PATH" "$UPLOAD_FILE" 2>>"$LOG_FILE"
+if [ ! -f "$UPLOAD_FILE" ]; then
+    log "ERROR: Failed to copy file to $UPLOAD_FILE"
+    notify "Scan Upload Failed" "Cannot copy file — check permissions" "Basso"
+    exit 1
+fi
+log "INFO: Copied to $UPLOAD_FILE ($(stat -f%z "$UPLOAD_FILE" 2>/dev/null) bytes)"
+
+# POST the file as multipart form data
+RESPONSE=$(/usr/bin/curl -s -w "\n%{http_code}" \
+    --max-time 120 \
+    --connect-timeout 15 \
+    -F "file=@${UPLOAD_FILE}" \
+    -F "filename=${FILENAME}" \
+    -F "scanned_at=${SCANNED_AT}" \
+    -F "source=scansnap-ix2500" \
+    "$WEBHOOK_URL" 2>&1)
+CURL_EXIT=$?
+
+# Clean up temp file
+rm -f "$UPLOAD_FILE"
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+log "INFO: curl exit=$CURL_EXIT HTTP=$HTTP_CODE — $BODY"
+
+if [ "$HTTP_CODE" = "200" ]; then
+    ROUTE=$(echo "$BODY" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('route','Unknown'))" 2>/dev/null || echo "Done")
+    CLASSIFIED=$(echo "$BODY" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('filename',''))" 2>/dev/null || echo "$FILENAME")
+    notify "Scan Uploaded" "Routed to: $ROUTE — $CLASSIFIED" "Glass"
+else
+    log "ERROR: Upload failed — curl exit=$CURL_EXIT HTTP=$HTTP_CODE"
+    notify "Scan Upload Failed" "curl=$CURL_EXIT HTTP=$HTTP_CODE — check logs" "Basso"
+    exit 1
+fi
